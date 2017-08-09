@@ -20,7 +20,7 @@
 			<label for="list_name"> Enter the new name of your list: </label>
 		</dt>
 			<dd>
-				<input name="list_name" placeholder="List Name" type="text" value="<%=@list[:name] unless params[:list_name]%>">
+				<input name="list_name" placeholder="List Name" type="text" value="<%=@list[:name] || params[:list_name]%>">
 			</dd>
 	</dl>
 	<fieldset class="actions">
