@@ -5,7 +5,7 @@
 			<a href="/lists/<%=list_item[:id]%>">
 				<h2><%=list_item[:name]%></h2>
 				<p>
-				<%= todos_remaining_count(list_item) %> / <%= todos_count(list_item) %></p>
+				<%= list_item[:todos_remaining_count] %> / <%= list_item[:todos_count] %></p>
 			</a>
 		</li>
 	<% end %>

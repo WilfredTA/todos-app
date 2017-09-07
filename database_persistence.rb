@@ -18,14 +18,61 @@ class DatabasePersistence
 	end
 
 	def all_lists
-		sql = "SELECT * FROM list;"
+		sql = <<~sql
+					SELECT list.*,
+					COUNT(todo.id) AS todos_count,
+					COUNT(NULLIF(todo.completed, true)) AS todos_remaining_count
+					FROM list
+					LEFT JOIN todo ON todo.list_id = list.id
+					GROUP BY list.id;
+				sql
+
 		result = query(sql)
 
 		result.map do |tuple|
-			list_id = tuple["id"]
-			{id: list_id, name: tuple["name"]}
+			{ id: tuple["id"], 
+			 name: tuple["name"],
+			 todos_count: tuple["todos_count"].to_i,
+			 todos_remaining_count: tuple["todos_remaining_count"].to_i }
 		end
 
+	end
+
+	def get_list(id)
+		sql = <<~Sql
+					SELECT list.*,
+					COUNT(todo.id) AS todos_count,
+					COUNT(NULLIF(todo.completed, true)) AS todos_remaining_count
+					FROM list
+					LEFT JOIN todo ON todo.list_id = list.id
+					WHERE list.id = $1
+					GROUP BY list.id;
+			Sql
+
+		result = query(sql, id)
+
+		tuple = result.first
+
+		todos = find_todos_for_list(list_id)
+
+
+		{id: tuple["id"], 
+		 name: tuple["name"], 
+		 todos: todos, 
+		 todos_count: tuple["todos_count"].to_i,
+		 todos_remaining_count: tuple["todos_remaining_count"].to_i }
+	end
+
+	def find_todos_for_list(list_id)
+		todo_sql = "SELECT * FROM todo WHERE list_id = $1"
+
+		todos_result = query(todo_sql, list_id)
+
+		todos_result.map do |todo_tuple|
+		     { id: todo_tuple["id"],
+		    	 name: todo_tuple["name"], 
+		    	 completed: todo_tuple["completed"] == 't' }
+		  end
 	end
 
 	def add_list(list_name)
@@ -36,28 +83,6 @@ class DatabasePersistence
 	def delete_list(id)
 		sql = "DELETE FROM list WHERE id = $1"
 		query(sql, id)
-	end
-
-	def get_list(id)
-		sql = "SELECT * FROM list WHERE id = $1"
-		result = query(sql, id)
-
-
-		tuple = result.first
-
-
-		 todo_sql = "SELECT * FROM todo WHERE list_id = $1"
-
-		 todos_result = query(todo_sql, tuple["id"])
-
-		 todos = todos_result.map do |todo_tuple|
-		    	{ id: todo_tuple["id"],
-		    	 name: todo_tuple["name"], 
-		    	 completed: todo_tuple["completed"] == 't' }
-		    end
-
-
-		{id: tuple["id"], name: tuple["name"], todos: todos}
 	end
 
 	def count_remaining_todos(list_id)
