@@ -1,13 +1,20 @@
 require 'sinatra'
 require 'sinatra/content_for'
-require 'sinatra/reloader' if development?
+
 require 'tilt/erubis'
+require_relative "database_persistence"
 
 
 configure do
 	enable :sessions
 	set :session_secret, 'secret'
 	set :erb, :escape_html => true
+end
+
+configure(:development) do
+	require 'sinatra/reloader'
+	also_reload "database_persistence.rb"
+
 end
 
 helpers do
@@ -21,11 +28,11 @@ helpers do
 	end
 
 	def todos_count(list)
-		list[:todos].size
+		@storage.count_total_todos(list[:id])
 	end
 
 	def todos_remaining_count(list)
-		list[:todos].select {|todo| !todo[:completed]}.size
+		@storage.count_remaining_todos(list[:id])
 	end
 
 	def sort_lists(lists, &block)
@@ -57,8 +64,9 @@ helpers do
 end
 
 before do
-	session[:lists] ||= []
+	@storage = DatabasePersistence.new(logger)
 end
+
 
 get '/' do
   redirect '/lists'
@@ -66,7 +74,7 @@ end
 
 # View all lists
 get '/lists' do
-	@lists = session[:lists]
+  @lists = @storage.all_lists
   erb :list, layout: :layout
 end
 
@@ -79,7 +87,7 @@ end
 def error_for_list_name(name)
   if !(1..100).cover? name.size
 		'List name must be between 1 and 100 characters'
-	elsif session[:lists].any? { |list| list[:name] == name }
+	elsif @storage.all_lists.any? { |list| list[:name] == name }
 		'List name must be unique.'
 	end
 end
@@ -91,6 +99,15 @@ def error_for_todo(name)
 	end
 end
 
+def load_list(id)
+	list = @storage.get_list(id)
+	return list if list
+
+	session[:error] = "The specified list was not found"
+	redirect "/lists"
+	halt
+end
+
 # Create a new list
 post '/lists' do
 	list_name = params[:list_name].strip
@@ -100,15 +117,16 @@ post '/lists' do
 		session[:error] = error
 		erb :new_list, layout: :layout
   else
-		session[:lists] << { name: list_name, todos: [] }
+		@storage.add_list(list_name)
 		session[:success] = 'The list has been created!'
 		redirect '/lists'
 	end
 end
 
+# View a single todo list
 get '/lists/:id' do
 	@list_id = params[:id].to_i
-	@list = session[:lists][@list_id]
+	@list = load_list(@list_id)
 	@completed = params[:completed]
 	erb :individual_list, layout: :layout
 end
@@ -116,7 +134,7 @@ end
 # Edit the name existing to do list
 get '/lists/:id/edit' do
 	@id = params[:id].to_i
-	@list = session[:lists][@id]
+	@list = @storage.get_list(@id)
 	erb :edit_list, layout: :layout
 end
 
@@ -124,14 +142,14 @@ end
 post '/lists/:id' do
 	list_name = params[:list_name].strip
 	@id = params[:id].to_i
-	@list = session[:lists][@id]
+	@list = @storage.get_list(@id)
 
 	error = error_for_list_name(list_name)
 	if error
 		session[:error] = error
 		erb :edit_list, layout: :layout
-  else
-		@list[:name] = list_name
+    else
+		@storage.update_list_name(@id, list_name)
 		session[:success] = 'The list has been updated!'
 		redirect "/lists/#{@id}"
 	end
@@ -140,7 +158,7 @@ end
 # Deletes a todo list
 post '/lists/:id/delete' do
 	id = params[:id].to_i
-	session[:lists].delete_at(id)
+	@storage.delete_list(id)
 	session[:success] = "The list has been deleted."
 	redirect "/lists"
 end
@@ -148,7 +166,7 @@ end
 # Add a new todo item to a list
 post '/lists/:list_id/todos' do
 	@list_id = params[:list_id].to_i
-	@list = session[:lists][@list_id]
+	@list = @storage.get_list(@list_id)
 	text = params[:todo].strip
 
 	error = error_for_todo(text)
@@ -156,7 +174,7 @@ post '/lists/:list_id/todos' do
 		session[:error] = error
 		erb :individual_list, layout: :layout
 	else
-		@list[:todos] << { name: text, completed: false }
+		@storage.add_todo(@list_id, text)
 		session[:success] = "The todo was added!"
 		redirect "/lists/#{@list_id}"
 	end
@@ -166,7 +184,7 @@ end
 post '/lists/:list_id/todos/:todo_id/delete' do
 	@list_id = params[:list_id].to_i
 	@todo_id = params[:todo_id].to_i
-	session[:lists][@list_id][:todos].delete_at(@todo_id)
+	@storage.delete_todo(@todo_id)
 	session[:success] = "The todo item has been deleted!"
 	redirect "/lists/#{@list_id}"
 end
@@ -175,22 +193,26 @@ end
 post '/lists/:list_id/todos/:todo_id' do
 	list_id = params[:list_id].to_i
 	completed = params[:completed] == "true"
-	list = session[:lists][list_id]
+	list = @storage.get_list(list_id)
 	todo_id = params[:todo_id].to_i
-	list[:todos][todo_id][:completed] = completed
+
+	@storage.toggle_todo(todo_id, completed)
 	session[:success] = "The todo item has been updated"
 	redirect "/lists/#{list_id}"
 end
 
 # Toggles all todo items at once
 post '/lists/:id/complete_all' do
-	id = params[:id].to_i
-	list = session[:lists][id]
+	list_id = params[:id].to_i
 
-	list[:todos].each{ |todo| todo[:completed] = true }
+	@storage.complete_all_todos(list_id)
 
 	session[:success] = "All todo items have been completed!"
-	redirect "/lists/#{id}"
+	redirect "/lists/#{list_id}"
+end
+
+after do
+	@storage.disconnect
 end
 
 
